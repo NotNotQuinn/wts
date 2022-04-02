@@ -1,6 +1,6 @@
 package wts
 
-// An actor performs an action on behalf of the node,
+// Actor performs an action on behalf of the node,
 // which gets requests from other services.
 //
 // If you would like to trigger the actor programmatically please
@@ -23,10 +23,10 @@ type FuncActor[MsgType any] struct {
 	ActFunc       IndicatorFunc[MsgType]
 }
 
-// An indicator function indicates something in relation to an event payload.
+// IndicatorFunc indicates something in relation to an event payload.
 type IndicatorFunc[MsgType any] func(msg *EventPayload[MsgType]) (ok bool)
 
-// Returns a human-readable name for this actor.
+// Name returns a human-readable name for this actor.
 func (a FuncActor[MsgType]) Name() string {
 	return a.ActorName
 }

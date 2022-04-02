@@ -25,14 +25,14 @@ var (
 	ErrUsedName = errors.New("an actor or emitter name was provided that is already in-use")
 )
 
-// A node acts as a GenericActor or a GenericEmitter or both.
+// Node acts as a GenericActor or a GenericEmitter or both.
 type Node struct {
 	// websub publisher used to publish websub events for communication
 	*websub.Publisher
 	// websub subscriber used to listen for websub events for communication
 	*websub.Subscriber
 	// Base URL for the Node
-	baseUrl string
+	baseURL string
 	// maps entity URL to actor
 	actors map[string]*actorProxy
 	// maps entity URL to emitter
@@ -55,15 +55,15 @@ type Node struct {
 	subscribed bool
 }
 
-func (n *Node) BaseUrl() string {
-	return n.baseUrl
+func (n *Node) BaseURL() string {
+	return n.baseURL
 }
 
 // NewNode creates a new node with the provided options.
-func NewNode(baseUrl, hubUrl string, options ...NodeOption) *Node {
-	baseUrl = strings.TrimRight(baseUrl, "/")
+func NewNode(baseURL, hubURL string, options ...NodeOption) *Node {
+	baseURL = strings.TrimRight(baseURL, "/")
 	n := &Node{
-		baseUrl:  baseUrl,
+		baseURL:  baseURL,
 		actors:   make(map[string]*actorProxy),
 		emitters: make(map[string]*emitterProxy),
 		external: make(map[string]*externalProxy),
@@ -84,8 +84,8 @@ func NewNode(baseUrl, hubUrl string, options ...NodeOption) *Node {
 		opt(n)
 	}
 
-	n.Publisher = websub.NewPublisher(baseUrl+"/", hubUrl, n.pubOptions...)
-	n.Subscriber = websub.NewSubscriber(baseUrl+"/_s/", n.subOptions...)
+	n.Publisher = websub.NewPublisher(baseURL+"/", hubURL, n.pubOptions...)
+	n.Subscriber = websub.NewSubscriber(baseURL+"/_s/", n.subOptions...)
 	// unallocate
 	n.pubOptions = nil
 	n.subOptions = nil
@@ -118,7 +118,7 @@ func (n *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type NodeOption func(n *Node)
 
-// Defaults to
+// WithPublisherOptions defaults to
 //
 //  []websub.PublisherOption{
 //    websub.PAdvertiseInvalidTopics(true),
@@ -126,20 +126,20 @@ type NodeOption func(n *Node)
 //  }
 //
 // Defaults take precedence over options set here, and
-// base url is set in relation to the Node's baseUrl.
+// base url is set in relation to the Node's baseURL.
 func WithPublisherOptions(opts ...websub.PublisherOption) NodeOption {
 	return func(n *Node) {
 		n.pubOptions = append(opts, n.pubOptions...)
 	}
 }
 
-// Defaults to
+// WithSubscriberOptions defaults to
 //
 //  []websub.SubscriberOption{
 //  }
 //
 // Defaults take precedence over options set here, and
-// base url is set in relation to the Node's baseUrl.
+// base url is set in relation to the Node's baseURL.
 func WithSubscriberOptions(
 	opts ...websub.SubscriberOption,
 ) NodeOption {
@@ -157,8 +157,8 @@ func (n *Node) SubscribeAll() error {
 	n.subscribed = true
 
 	n.mu.RLock()
-	for actorUrl := range n.actors {
-		err := n.subscribeTopic(actorUrl + "/" + string(Request))
+	for actorURL := range n.actors {
+		err := n.subscribeTopic(actorURL + "/" + string(Request))
 		if err != nil {
 			n.mu.RUnlock()
 			return err
@@ -169,7 +169,7 @@ func (n *Node) SubscribeAll() error {
 	return nil
 }
 
-// UnsubscribeALl
+// UnsubscribeAll removes all required subscriptions for the node
 func (n *Node) UnsubscribeAll() error {
 	if !n.subscribed {
 		return errors.New("not subscribed")
@@ -225,15 +225,15 @@ func (n *Node) handleSubscription(
 		return // ignore
 	}
 
-	if !strings.HasPrefix(sub.Topic, n.baseUrl) {
+	if !strings.HasPrefix(sub.Topic, n.baseURL) {
 		log.Debug().
 			Str("topic", sub.Topic).
-			Str("baseUrl", n.baseUrl).
-			Msg("entity URL in subscription does not start with node baseUrl")
+			Str("baseURL", n.baseURL).
+			Msg("entity URL in subscription does not start with node baseURL")
 		return // ignore
 	}
 
-	entityUrl, eventType, err := n.parseEventUrl(sub.Topic)
+	entityURL, eventType, err := n.parseEventURL(sub.Topic)
 	if err != nil {
 		log.Debug().
 			AnErr("parsingError", err).
@@ -267,7 +267,7 @@ func (n *Node) handleSubscription(
 		}
 
 		n.mu.RLock()
-		actor, exists := n.actors[entityUrl]
+		actor, exists := n.actors[entityURL]
 		n.mu.RUnlock()
 		if !exists {
 			// how would this even happen
@@ -279,11 +279,11 @@ func (n *Node) handleSubscription(
 
 		if actor.shouldAct(message) {
 			if actor.act(message) {
-				eventUrl := entityUrl + "/" + string(Executed)
-				err := n.Broadcast(eventUrl, message.Data)
+				eventURL := entityURL + "/" + string(Executed)
+				err := n.Broadcast(eventURL, message.Data)
 				if err != nil {
 					log.Err(err).
-						Str("eventUrl", eventUrl).
+						Str("eventURL", eventURL).
 						Msg("could not broadcast execution")
 					return
 				}
@@ -306,8 +306,8 @@ func (n *Node) handleSubscription(
 	}
 }
 
-func (n *Node) parseEventUrl(eventUrl string) (entityUrl string, eventType EventType, err error) {
-	parsed, err := url.Parse(eventUrl)
+func (n *Node) parseEventURL(eventURL string) (entityURL string, eventType EventType, err error) {
+	parsed, err := url.Parse(eventURL)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid event url: %w", err)
 	}
@@ -322,7 +322,7 @@ func (n *Node) parseEventUrl(eventUrl string) (entityUrl string, eventType Event
 	entityPath, eventType := path[:lastSlash], EventType(path[lastSlash+1:])
 
 	parsed.Path = entityPath
-	entityUrl = parsed.String()
+	entityURL = parsed.String()
 
 	switch eventType {
 	case Executed, Data, Request:
@@ -333,13 +333,13 @@ func (n *Node) parseEventUrl(eventUrl string) (entityUrl string, eventType Event
 	}
 }
 
-func (n *Node) Broadcast(eventUrl string, msgData any) error {
-	content, err := n.encode(eventUrl, msgData)
+func (n *Node) Broadcast(eventURL string, msgData any) error {
+	content, err := n.encode(eventURL, msgData)
 	if err != nil {
 		return err
 	}
 
-	err = n.Publish(eventUrl, PayloadContentType, content)
+	err = n.Publish(eventURL, PayloadContentType, content)
 	if err != nil {
 		return err
 	}
@@ -348,8 +348,8 @@ func (n *Node) Broadcast(eventUrl string, msgData any) error {
 }
 
 // getEventEncoder gets the encoder proxy for a specific event
-func (n *Node) getEventEncoder(eventUrl string) (*encoderProxy, error) {
-	entityUrl, eventType, err := n.parseEventUrl(eventUrl)
+func (n *Node) getEventEncoder(eventURL string) (*encoderProxy, error) {
+	entityURL, eventType, err := n.parseEventURL(eventURL)
 	if err != nil {
 		return nil, err
 	}
@@ -358,13 +358,13 @@ func (n *Node) getEventEncoder(eventUrl string) (*encoderProxy, error) {
 	case Request, Executed:
 		var encoder *encoderProxy
 		n.mu.RLock()
-		actor, exists := n.actors[entityUrl]
+		actor, exists := n.actors[entityURL]
 		n.mu.RUnlock()
 		if exists {
 			encoder = actor.encoderProxy
 		} else {
 			n.mu.RLock()
-			external, exists := n.external[entityUrl]
+			external, exists := n.external[entityURL]
 			n.mu.RUnlock()
 			if exists && external.actor != nil {
 				encoder = external.actor
@@ -378,13 +378,13 @@ func (n *Node) getEventEncoder(eventUrl string) (*encoderProxy, error) {
 	case Data:
 		var encoder *encoderProxy
 		n.mu.RLock()
-		emitter, exists := n.emitters[entityUrl]
+		emitter, exists := n.emitters[entityURL]
 		n.mu.RUnlock()
 		if exists {
 			encoder = emitter.encoderProxy
 		} else {
 			n.mu.RLock()
-			external, exists := n.external[entityUrl]
+			external, exists := n.external[entityURL]
 			n.mu.RUnlock()
 			if exists && external.emitter != nil {
 				encoder = external.emitter
@@ -401,18 +401,18 @@ func (n *Node) getEventEncoder(eventUrl string) (*encoderProxy, error) {
 }
 
 // Encode encodes a message according to the event's type
-func (n *Node) encode(eventUrl string, msgData any) ([]byte, error) {
-	_, eventType, err := n.parseEventUrl(eventUrl)
+func (n *Node) encode(eventURL string, msgData any) ([]byte, error) {
+	_, eventType, err := n.parseEventURL(eventURL)
 	if err != nil {
 		return nil, err
 	}
 
-	encoder, err := n.getEventEncoder(eventUrl)
+	encoder, err := n.getEventEncoder(eventURL)
 	if err != nil {
 		return nil, err
 	}
 
-	content, err := encoder.Encode(msgData, eventType, n.baseUrl)
+	content, err := encoder.Encode(msgData, eventType, n.baseURL)
 	if err != nil {
 		return nil, err
 	}

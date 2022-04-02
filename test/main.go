@@ -21,8 +21,8 @@ type EmitterMsg struct {
 }
 
 func main() {
-	hubUrl, _ := startHub(8080)
-	node := startNode("node", 4044, hubUrl)
+	hubURL, _ := startHub(8080)
+	node := startNode("node", 4044, hubURL)
 
 	err := node.SubscribeAll()
 	if err != nil {
@@ -72,14 +72,14 @@ func main() {
 		panic(err)
 	}
 
-	err = node.Broadcast(node.BaseUrl()+"/test/request", ActorMsg{
+	err = node.Broadcast(node.BaseURL()+"/test/request", ActorMsg{
 		Sound: "xd",
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	node2 := startNode("node2", 4045, hubUrl)
+	node2 := startNode("node2", 4045, hubURL)
 
 	err = node2.SubscribeAll()
 	if err != nil {
@@ -109,9 +109,9 @@ func main() {
 	<-make(chan struct{})
 }
 
-func startNode(loggingName string, port int, hubUrl string) *wts.Node {
+func startNode(loggingName string, port int, hubURL string) *wts.Node {
 	self := fmt.Sprintf("http://localhost:%d/", port)
-	n := wts.NewNode(self, hubUrl)
+	n := wts.NewNode(self, hubURL)
 
 	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), n)
 	log.Debug().Msgf("[%s] Listening on %s", loggingName, self)
@@ -120,7 +120,7 @@ func startNode(loggingName string, port int, hubUrl string) *wts.Node {
 }
 
 // starts hub at localhost:port (not exposed)
-func startHub(port int) (hubUrl string, hub *websub.Hub) {
+func startHub(port int) (hubURL string, hub *websub.Hub) {
 	self := fmt.Sprintf("http://localhost:%d/", port)
 	h := websub.NewHub(
 		self,

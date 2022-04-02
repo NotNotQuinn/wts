@@ -15,12 +15,12 @@ type BasicEmitter[MsgType any] struct {
 	DataChannel <-chan MsgType
 }
 
-// Returns a human-readable constant name for this emitter.
+// Name returns a human-readable constant name for this emitter.
 func (e *BasicEmitter[MsgType]) Name() string {
 	return e.EmitterName
 }
 
-// Returns a channel that passes dataEvents to be published.
+// DataEvents returns a channel that passes dataEvents to be published.
 func (e *BasicEmitter[MsgType]) DataEvents() <-chan MsgType {
 	return e.DataChannel
 }

@@ -60,7 +60,7 @@ func (e *EventPayload[MsgType]) CopyToAny() *EventPayload[any] {
 	return &new
 }
 
-// Encodes a message to JSON
+// EncodeMessage encodes a message to JSON
 func EncodeMessage[MsgType any](
 	msg MsgType,
 	eventType EventType,
@@ -74,7 +74,7 @@ func EncodeMessage[MsgType any](
 	})
 }
 
-// Decodes from JSON.
+// DecodeMessage decodes a message from JSON.
 func DecodeMessage[MsgType any](bytes []byte) (*EventPayload[MsgType], error) {
 	m := &EventPayload[MsgType]{}
 	err := json.Unmarshal(bytes, m)

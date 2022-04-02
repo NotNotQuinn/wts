@@ -7,10 +7,10 @@ import (
 // AddActor adds an actor to the node
 func AddActor[MsgType any](node *Node, a Actor[MsgType]) error {
 	proxy := newActorProxy(a)
-	actorUrl := node.baseUrl + "/" + a.Name()
+	actorURL := node.baseURL + "/" + a.Name()
 
 	node.mu.RLock()
-	_, exists := node.emitters[actorUrl]
+	_, exists := node.emitters[actorURL]
 	node.mu.RUnlock()
 
 	if exists {
@@ -18,14 +18,14 @@ func AddActor[MsgType any](node *Node, a Actor[MsgType]) error {
 	}
 
 	if node.subscribed {
-		err := node.subscribeTopic(actorUrl + "/" + string(Request))
+		err := node.subscribeTopic(actorURL + "/" + string(Request))
 		if err != nil {
 			return err
 		}
 	}
 
 	node.mu.Lock()
-	node.actors[actorUrl] = proxy
+	node.actors[actorURL] = proxy
 	node.mu.Unlock()
 	return nil
 }
@@ -33,10 +33,10 @@ func AddActor[MsgType any](node *Node, a Actor[MsgType]) error {
 // AddEmitter adds an emitter to the node
 func AddEmitter[MsgType any](node *Node, e Emitter[MsgType]) error {
 	proxy := newEmitterProxy(e)
-	emitterUrl := node.baseUrl + "/" + e.Name()
+	emitterURL := node.baseURL + "/" + e.Name()
 
 	node.mu.RLock()
-	_, exists := node.emitters[emitterUrl]
+	_, exists := node.emitters[emitterURL]
 	node.mu.RUnlock()
 
 	if exists {
@@ -44,28 +44,28 @@ func AddEmitter[MsgType any](node *Node, e Emitter[MsgType]) error {
 	}
 
 	node.mu.Lock()
-	node.emitters[emitterUrl] = proxy
+	node.emitters[emitterURL] = proxy
 	node.mu.Unlock()
 
-	go func(node *Node, emitterUrl string, ch <-chan MsgType) {
+	go func(node *Node, emitterURL string, ch <-chan MsgType) {
 		for msg := range ch {
-			err := node.Broadcast(emitterUrl+"/"+string(Data), msg)
+			err := node.Broadcast(emitterURL+"/"+string(Data), msg)
 			if err != nil {
 				log.Err(err).
-					Str("emitterUrl", emitterUrl).
+					Str("emitterURL", emitterURL).
 					Msg("could not broadcast data event")
 			}
 		}
-	}(node, emitterUrl, e.DataEvents())
+	}(node, emitterURL, e.DataEvents())
 
 	return nil
 }
 
-// AddExternalActor adds an external actor which can we can listen to events from
-func AddExternalEmitter[MsgType any](node *Node, emitterUrl string) error {
+// AddExternalEmitter adds an external emitter which can we can listen to events from
+func AddExternalEmitter[MsgType any](node *Node, emitterURL string) error {
 	emitterEncoding := NewEncoderProxy[MsgType]()
 	node.mu.RLock()
-	proxy, exists := node.external[emitterUrl]
+	proxy, exists := node.external[emitterURL]
 	node.mu.RUnlock()
 	if exists {
 		if proxy.emitter != nil {
@@ -78,17 +78,17 @@ func AddExternalEmitter[MsgType any](node *Node, emitterUrl string) error {
 			emitter: emitterEncoding,
 		}
 		node.mu.Lock()
-		node.external[emitterUrl] = proxy
+		node.external[emitterURL] = proxy
 		node.mu.Unlock()
 	}
 	return nil
 }
 
 // AddExternalActor adds an external actor which can be requested to act
-func AddExternalActor[MsgType any](node *Node, actorUrl string) error {
+func AddExternalActor[MsgType any](node *Node, actorURL string) error {
 	actorEncoding := NewEncoderProxy[MsgType]()
 	node.mu.RLock()
-	proxy, exists := node.external[actorUrl]
+	proxy, exists := node.external[actorURL]
 	node.mu.RUnlock()
 	if exists {
 		if proxy.actor != nil {
@@ -101,7 +101,7 @@ func AddExternalActor[MsgType any](node *Node, actorUrl string) error {
 			emitter: nil,
 		}
 		node.mu.Lock()
-		node.external[actorUrl] = proxy
+		node.external[actorURL] = proxy
 		node.mu.Unlock()
 	}
 	return nil
