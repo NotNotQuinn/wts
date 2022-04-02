@@ -5,12 +5,16 @@
 			"path": "."
 		},
 		{
-			"name": "go-websub",
-			"path": "..\\go-websub"
+			"name": "v8go-polyfills",
+			"path": "../v8go-polyfills"
 		},
 		{
 			"name": "pi-home-server",
-			"path": "..\\pi-home-server"
+			"path": "../pi-home-server"
+		},
+		{
+			"name": "go-websub",
+			"path": "../go-websub"
 		}
 	],
 	"settings": {
