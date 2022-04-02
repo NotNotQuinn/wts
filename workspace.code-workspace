@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"name": "websub-transport-system",
+			"path": "."
+		},
+		{
+			"name": "go-websub",
+			"path": "..\\go-websub"
+		},
+		{
+			"name": "pi-home-server",
+			"path": "..\\pi-home-server"
+		}
+	],
+	"settings": {
+		"cSpell.words": [
+			"ngrok",
+			"vals"
+		]
+	}
+}
