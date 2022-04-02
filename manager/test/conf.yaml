@@ -1,0 +1,25 @@
+hubURL: http://localhost:8080/
+hubPort: 8080
+
+rules:
+    ctrl_playsound:
+        triggers:
+            - event:
+                onReceiveScript: |
+                    // nothing
+                type: data
+                url: http://localhost:4044/keypress/ctrl
+        action:
+            script: |
+                // nothing
+            event:
+                onSendScript: |
+                    console.log(xd)
+                type: request
+                url: http://localhost:4044/playsound
+
+scripts:
+    enabled: y
+    init: |
+        var xd = "xdlmao"
+        console.log("xd is this value:", xd)
