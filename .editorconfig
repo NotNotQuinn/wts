@@ -12,3 +12,4 @@ insert_final_newline = true
 # Does not allow tabs
 [*.{yaml,yml}]
 indent_style = space
+indent_size = 2

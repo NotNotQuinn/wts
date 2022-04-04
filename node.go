@@ -233,7 +233,7 @@ func (n *Node) handleSubscription(
 		return // ignore
 	}
 
-	entityURL, eventType, err := n.parseEventURL(sub.Topic)
+	entityURL, eventType, err := ParseEventURL(sub.Topic)
 	if err != nil {
 		log.Debug().
 			AnErr("parsingError", err).
@@ -306,7 +306,10 @@ func (n *Node) handleSubscription(
 	}
 }
 
-func (n *Node) parseEventURL(eventURL string) (entityURL string, eventType EventType, err error) {
+// ParseEventURL parses the event type and entity of an Event URL
+//
+// An event URL is any url that ends with /data /request or /executed
+func ParseEventURL(eventURL string) (entityURL string, eventType EventType, err error) {
 	parsed, err := url.Parse(eventURL)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid event url: %w", err)
@@ -349,7 +352,7 @@ func (n *Node) Broadcast(eventURL string, msgData any) error {
 
 // getEventEncoder gets the encoder proxy for a specific event
 func (n *Node) getEventEncoder(eventURL string) (*encoderProxy, error) {
-	entityURL, eventType, err := n.parseEventURL(eventURL)
+	entityURL, eventType, err := ParseEventURL(eventURL)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +405,7 @@ func (n *Node) getEventEncoder(eventURL string) (*encoderProxy, error) {
 
 // Encode encodes a message according to the event's type
 func (n *Node) encode(eventURL string, msgData any) ([]byte, error) {
-	_, eventType, err := n.parseEventURL(eventURL)
+	_, eventType, err := ParseEventURL(eventURL)
 	if err != nil {
 		return nil, err
 	}
