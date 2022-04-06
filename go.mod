@@ -11,7 +11,7 @@ require (
 require honnef.co/go/tools v0.3.0 // indirect
 
 require (
-	github.com/Acetolyne/keylogger v0.0.0-20220223033538-e677cb9586d8
+	github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8
 	github.com/BurntSushi/toml v0.4.1 // indirect
 	github.com/akrennmair/slice v0.0.0-20220105203817-49445747ab81 // indirect
 	github.com/google/uuid v1.3.0 // indirect

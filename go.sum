@@ -1,5 +1,5 @@
-github.com/Acetolyne/keylogger v0.0.0-20220223033538-e677cb9586d8 h1:cDlZD07p1nMCKV0J6ZWKDNqOGpQIiKWienn1EB69wRo=
-github.com/Acetolyne/keylogger v0.0.0-20220223033538-e677cb9586d8/go.mod h1:gWU5FDeFFYSZd5KgZ+Pyb2ku/cV4Y61hDkgP6DG9Ldg=
+github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8 h1:cDlZD07p1nMCKV0J6ZWKDNqOGpQIiKWienn1EB69wRo=
+github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8/go.mod h1:gWU5FDeFFYSZd5KgZ+Pyb2ku/cV4Y61hDkgP6DG9Ldg=
 github.com/BurntSushi/toml v0.4.1 h1:GaI7EiDXDRfa8VshkTj7Fym7ha+y8/XxIgD2okUIjLw=
 github.com/BurntSushi/toml v0.4.1/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
 github.com/akrennmair/slice v0.0.0-20220105203817-49445747ab81 h1:HnuAxArB0uUxqjRvZdjhBxE3uPXNeJvNNbuaV4QhHMU=
