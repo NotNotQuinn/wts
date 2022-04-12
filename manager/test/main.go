@@ -27,8 +27,8 @@ func main() {
 		panic(fmt.Sprintf("%d errors: see above\n", len(errs)))
 	}
 
-	pp.Println(m.Config)
-	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", m.Config.HubPort), m)
+	pp.Println(m)
+	panic(http.ListenAndServe(fmt.Sprintf(":%d", m.Config.HubPort), m))
 
 	emit, _ := createEmitter(4044, m.HubURL())
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/itchyny/gojq"
 	"github.com/notnotquinn/wts"
@@ -12,11 +13,12 @@ import (
 
 // Config is the configuration for a Manager
 type Config struct {
-	BaseURL     string            `yaml:"baseURL"`
-	HubPort     int               `yaml:"port"`
-	JQTimeoutMS int               `yaml:"jq-timeout-ms"`
-	Vars        map[string]string `yaml:"vars"`
-	Rules       map[string]Rule   `yaml:"rules"`
+	BaseURL          string            `yaml:"baseURL"`
+	HubPort          int               `yaml:"port"`
+	JQTimeoutMS      int               `yaml:"jq-timeout-ms"`
+	JQIterationLimit int               `yaml:"jq-iteration-limit"`
+	Vars             map[string]string `yaml:"vars"`
+	Rules            map[string]Rule   `yaml:"rules"`
 }
 
 // Rule is a rule that can be triggered by triggers, and has variables local to itself.
@@ -51,6 +53,7 @@ type VariableModifier struct {
 type Action struct {
 	TriggerCondition *TriggerCondition           `yaml:"if"`
 	Event            *string                     `yaml:"event"`
+	DynamicEvent     *string                     `yaml:"dynamic-event"`
 	ModifyVars       map[string]VariableModifier `yaml:"modify-vars"`
 	DataQuery        *string                     `yaml:"data-jq"`
 }
@@ -106,13 +109,23 @@ func (c *Config) validate() (errs []error) {
 	globalVars := map[string]bool{}
 
 	for varName := range c.Vars {
-		if globalVars[varName] {
-			err = fmt.Errorf("global variable %q redeclared", varName)
+		var hadErr bool
+
+		if strings.HasPrefix(varName, "_") {
+			hadErr = true
+			err = fmt.Errorf("variable name must not start with an underscore: %q", varName)
 			errs = append(errs, err)
-		} else {
-			globalVars[varName] = true
 		}
 
+		if globalVars[varName] {
+			hadErr = true
+			err = fmt.Errorf("global variable %q redeclared", varName)
+			errs = append(errs, err)
+		}
+
+		if !hadErr {
+			globalVars[varName] = true
+		}
 	}
 
 	for ruleName, rule := range c.Rules {
@@ -134,21 +147,27 @@ func (r *Rule) validate(globalVars map[string]bool) (errs []error) {
 	ruleVars := map[string]bool{}
 
 	for varName := range r.Vars {
-		var hadError bool
+		var hadErr bool
+
+		if strings.HasPrefix(varName, "_") {
+			hadErr = true
+			err = fmt.Errorf("variable name must not start with an underscore: %q", varName)
+			errs = append(errs, err)
+		}
 
 		if globalVars[varName] {
-			hadError = true
+			hadErr = true
 			err = fmt.Errorf("variable shaddows global variable %q", varName)
 			errs = append(errs, err)
 		}
 
 		if ruleVars[varName] {
-			hadError = true
+			hadErr = true
 			err = fmt.Errorf("redeclaration of variable %q", varName)
 			errs = append(errs, err)
 		}
 
-		if !hadError {
+		if !hadErr {
 			ruleVars[varName] = true
 		}
 	}
@@ -193,10 +212,12 @@ func (r *Rule) validate(globalVars map[string]bool) (errs []error) {
 // validate checks the Action is valid
 func (a *Action) validate(vars, triggers map[string]bool) (errs []error) {
 	var err error
-	err = validateEventString(*a.Event)
-	if err != nil {
-		err = fmt.Errorf("event: %w", err)
-		errs = append(errs, err)
+	if a.Event != nil {
+		err = validateEventString(*a.Event)
+		if err != nil {
+			err = fmt.Errorf("event: %w", err)
+			errs = append(errs, err)
+		}
 	}
 
 	for varName, vm := range a.ModifyVars {
@@ -209,18 +230,20 @@ func (a *Action) validate(vars, triggers map[string]bool) (errs []error) {
 		}
 	}
 
-	validationErrors := a.TriggerCondition.validate(vars, triggers)
+	if a.TriggerCondition != nil {
+		validationErrors := a.TriggerCondition.validate(vars, triggers)
 
-	// Wrap all returned errors
-	for _, err2 := range validationErrors {
-		err = fmt.Errorf("if: %w", err2)
-		errs = append(errs, err)
+		// Wrap all returned errors
+		for _, err2 := range validationErrors {
+			err = fmt.Errorf("if: %w", err2)
+			errs = append(errs, err)
+		}
 	}
 
 	if a.DataQuery != nil {
 		_, err := gojq.Parse(*a.DataQuery)
 		if err != nil {
-
+			errs = append(errs, err)
 		}
 	}
 

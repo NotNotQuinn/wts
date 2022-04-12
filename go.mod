@@ -6,14 +6,15 @@ require (
 	github.com/itchyny/gojq v0.12.7
 	github.com/notnotquinn/go-websub v0.2.1-0.20220401210256-463b0ef0c0e0
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	github.com/NotNotQuinn/keylogger v0.0.0-20220404225929-ec38e985d330
 )
 
 require honnef.co/go/tools v0.3.0 // indirect
 
 require (
-	github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8
 	github.com/BurntSushi/toml v0.4.1 // indirect
 	github.com/akrennmair/slice v0.0.0-20220105203817-49445747ab81 // indirect
+	github.com/alecthomas/repr v0.0.0-20220113201626-b1b626ac65ae
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/itchyny/timefmt-go v0.1.3 // indirect
 	github.com/k0kubun/pp v3.0.1+incompatible // indirect
@@ -28,8 +29,3 @@ require (
 	golang.org/x/tools v0.1.11-0.20220316014157-77aa08bb151a // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )
-
-// require rogchap.com/v8go v0.7.0
-// require go.kuoruan.net/v8go-polyfills v0.5.0
-// Made PR to add these features, however it has not been merged yet and I would like to use them.
-// replace go.kuoruan.net/v8go-polyfills v0.5.0 => github.com/NotNotQuinn/v8go-polyfills v0.5.1-0.20220402045617-4e94d8bb5eed

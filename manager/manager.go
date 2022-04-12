@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akrennmair/slice"
@@ -17,14 +19,20 @@ import (
 	"github.com/notnotquinn/wts"
 )
 
+var log = websub.Logger()
+
 // Manager acts as the Hub for multiple Nodes that communicate to eachother,
 // and can intercept all communications and events broadcasted between the nodes
 // to trigger other events.
 type Manager struct {
+	*wts.Node
 	*websub.Hub
+	mux        *http.ServeMux
 	Config     *Config
 	GlobalVars map[string]string
 	Vars       map[string]map[string]string
+	// Mutex for variable maps
+	mu *sync.RWMutex
 }
 
 // NewManager creates a new manager based on the config file.
@@ -49,16 +57,40 @@ func NewManager(configFile string) (*Manager, []error) {
 		}
 	}
 
+	h := websub.NewHub(conf.BaseURL,
+		websub.HubAllowPostBodyAsContent(true),
+		websub.HubExposeTopics(true),
+		websub.HubWithHashFunction("sha256"),
+		websub.HubWithUserAgent("wts-manager-hub"),
+	)
+
+	n := wts.NewNode(h.HubURL()+"/p/", h.HubURL(),
+		wts.WithPublisherOptions(
+			websub.PublisherAdvertiseInvalidTopics(true),
+			websub.PublisherWithPostBodyAsContent(true),
+		),
+	)
+
 	m := &Manager{
-		Hub:        websub.NewHub(conf.BaseURL),
+		Hub:        h,
+		Node:       n,
+		mux:        http.NewServeMux(),
 		Config:     conf,
 		GlobalVars: globalVars,
 		Vars:       vars,
+		mu:         &sync.RWMutex{},
 	}
+
+	m.mux.Handle("/", h)
+	m.mux.Handle("/p/", n)
 
 	m.registerSniffers()
 
 	return m, nil
+}
+
+func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	m.mux.ServeHTTP(w, r)
 }
 
 func (m *Manager) getSniffedTopics() (topics []string) {
@@ -72,13 +104,24 @@ func (m *Manager) getSniffedTopics() (topics []string) {
 }
 
 func (m *Manager) registerSniffers() {
-	topics := m.getSniffedTopics()
-
-	for _, topic := range topics {
+	for _, topic := range m.getSniffedTopics() {
 		topic = strings.TrimSuffix(topic, "/")
 		m.AddSniffer(topic, m.sniffer)
 		m.AddSniffer(topic+"/", m.sniffer)
 	}
+
+	count := 0
+	countMu := sync.Mutex{}
+	m.AddSniffer("", func(topic, contentType string, body io.Reader) {
+		var currentCount int
+
+		countMu.Lock()
+		count++
+		currentCount = count
+		countMu.Unlock()
+
+		fmt.Printf("Publish #%04d: %s\n", currentCount, topic)
+	})
 }
 
 func (m *Manager) sniffer(topic, contentType string, bodyReader io.Reader) {
@@ -108,9 +151,9 @@ func (m *Manager) sniffer(topic, contentType string, bodyReader io.Reader) {
 					body:        &body,
 				})
 
-				// what do I do with these
-				_ = errs
-
+				if len(errs) > 0 {
+					log.Error().Errs("errors", errs).Msg("errors triggering rule")
+				}
 			}
 		}
 	}
@@ -122,15 +165,17 @@ type TriggerContext struct {
 	triggerName string
 	trigger     Trigger
 	m           *Manager
-	event       *string
-	body        *[]byte
+	event       *string // may be nil
+	body        *[]byte // may be nil
 }
 
 func (r *Rule) Triggered(c *TriggerContext) (errs []error) {
 	if c.trigger.ModifyVars != nil {
 		for variable, modifer := range c.trigger.ModifyVars {
 			err := modifer.Execute(variable, c)
-			errs = append(errs, err)
+			if err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 
@@ -145,11 +190,15 @@ func (r *Rule) Triggered(c *TriggerContext) (errs []error) {
 
 	// TOxDO: implement triggering a rule
 	// TOxDO: implement checking action conditions
-	// TODO: implement sending events as actions
-	// TODO: possibly come up with a different way to get the
+	// TOxDO: implement sending events as actions
+	// TODO(later): possibly come up with a different way to get the
 	//       body for an outgoing event
-	// TODO: expose variables in jq somehow
+	// TODO(doing): expose variables in jq somehow
 	// TODO: make the event triggered and other shit reserved variables
+
+	if len(errs) == 0 {
+		return nil
+	}
 
 	return
 }
@@ -162,28 +211,90 @@ func (a *Action) Trigger(c *TriggerContext) (errs []error) {
 	}
 
 	for k, vm := range a.ModifyVars {
-		errs = append(errs, vm.Execute(k, c))
+		err := vm.Execute(k, c)
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	// TODO: gojq on a.DataQuery
+	var event *string
+	if a.DynamicEvent != nil {
+		value, err := c.m.JSONQuery(*a.DynamicEvent, c)
+		if err != nil {
+			errs = append(errs, err)
+		}
 
-	go c.m.Publish(*a.Event, wts.PayloadContentType, jsonEncoded)
+		v, ok := value.(string)
+		if ok {
+			err := validateEventString(v)
+			if err != nil {
+				errs = append(errs, err)
+			}
 
+			event = &v
+		} else {
+			errs = append(errs, errors.New("dynamic event returned non-string type"))
+		}
+	} else if a.Event != nil {
+		event = a.Event
+	}
+
+	if event != nil {
+		if a.DataQuery != nil {
+			val, err := c.m.JSONQuery(*a.DataQuery, c)
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				jsonEncoded, err := json.Marshal(val)
+				if err != nil {
+					errs = append(errs, err)
+				} else {
+					go func(m *Manager, topic string, contentType string, content []byte) {
+						err := m.Publish(topic, contentType, content)
+						if err != nil {
+							log.Err(err).Msg("could not publish action event")
+						}
+					}(c.m, *event, wts.PayloadContentType, jsonEncoded)
+				}
+			}
+		} else {
+			err := errors.New("cannot post event without data")
+			errs = append(errs, err)
+		}
+	}
+
+	return
+}
+
+// Publish calls m.Node.Publish
+func (m *Manager) Publish(topic string, contentType string, content []byte) error {
+	return m.Node.Publish(topic, contentType, content)
 }
 
 // Check checks the condition on a certain context
-func (tc *TriggerCondition) Check(c *TriggerContext) (pass bool, errs []error) {
+func (t *TriggerCondition) Check(c *TriggerContext) (pass bool, errs []error) {
+	if t == nil {
+		// no condition
+		return true, nil
+	}
+
 	var conditions []bool
 
 	// Value is a value to check by the "is:" option
 	var value *string
-	if tc.JSONQuery != nil {
-		// call gojq (make the one in the other function into a method)
-		panic("unimplemented")
+	if t.JSONQuery != nil {
+
+		val, err := c.m.JSONQuery(*t.JSONQuery, c)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			str := fmt.Sprint(val)
+			value = &str
+		}
 	}
 
-	if tc.Variable != nil {
-		val, err := c.m.Var(c.ruleName, *tc.Variable)
+	if t.Variable != nil {
+		val, err := c.m.Var(c.ruleName, *t.Variable)
 		if err != nil {
 			errs = append(errs, err)
 		} else {
@@ -191,40 +302,44 @@ func (tc *TriggerCondition) Check(c *TriggerContext) (pass bool, errs []error) {
 		}
 	}
 
-	if tc.Is != nil {
+	if t.Is != nil {
 		if value != nil {
-			conditions = append(conditions, *tc.Is == *value)
+			conditions = append(conditions, (*t.Is) == (*value))
 		} else {
 			conditions = append(conditions, false)
 		}
 	}
 
-	if tc.EventIs != nil {
+	if t.EventIs != nil {
 		if c.event != nil {
-			conditions = append(conditions, *tc.EventIs == *c.event)
+			conditions = append(conditions, *t.EventIs == *c.event)
 		} else {
 			conditions = append(conditions, false)
 		}
 	}
 
-	if tc.TriggeredBy != nil {
-		conditions = append(conditions, *tc.TriggeredBy == c.triggerName)
+	if t.TriggeredBy != nil {
+		conditions = append(conditions, *t.TriggeredBy == c.triggerName)
 	}
 
-	pass = slice.Reduce(conditions,
-		func(t1 bool, t2 bool) bool {
-			return t1 && t2
-		},
-	)
+	if len(conditions) == 1 {
+		pass = conditions[0]
+	} else {
+		pass = slice.Reduce(conditions,
+			func(t1 bool, t2 bool) bool {
+				return t1 && t2
+			},
+		)
+	}
 
-	if tc.OR != nil {
-		for _, tc2 := range tc.OR {
+	if t.OR != nil {
+		for _, tc2 := range t.OR {
 			pass2, errs2 := tc2.Check(c)
 			errs = append(errs, errs2...)
 			pass = pass || pass2
 		}
-	} else if tc.AND != nil {
-		for _, tc2 := range tc.AND {
+	} else if t.AND != nil {
+		for _, tc2 := range t.AND {
 			pass2, errs2 := tc2.Check(c)
 			errs = append(errs, errs2...)
 			pass = pass && pass2
@@ -241,29 +356,43 @@ func (tc *TriggerCondition) Check(c *TriggerContext) (pass bool, errs []error) {
 // SetVar sets a variable, checking if it exists on the global context first.
 // If the var does not exist in both global and rule contexts, an error is returned.
 func (m *Manager) SetVar(rule, name, value string) error {
+	m.mu.RLock()
+
 	if _, ok := m.GlobalVars[name]; ok {
+		m.mu.RUnlock()
+		m.mu.Lock()
 		m.GlobalVars[name] = value
-	} else if m.Vars[name] != nil {
+		m.mu.Unlock()
+		return nil
+	} else if m.Vars[rule] != nil {
 		if _, ok := m.Vars[rule][name]; ok {
-			m.Vars[name][name] = value
+			m.mu.RUnlock()
+			m.mu.Lock()
+			m.Vars[rule][name] = value
+			m.mu.Unlock()
+			return nil
 		}
 	}
 
-	return fmt.Errorf("variable %q does not exist", name)
+	m.mu.RUnlock()
+	return fmt.Errorf("m.SetVar: variable %q does not exist", name)
 }
 
 // Var gets a variable, checking if it exists on the global context first.
 // If the var does not exist in both global and rule contexts, an error is returned.
 func (m *Manager) Var(rule, name string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if _, ok := m.GlobalVars[name]; ok {
 		return m.GlobalVars[name], nil
-	} else if m.Vars[name] != nil {
+	} else if m.Vars[rule] != nil {
 		if _, ok := m.Vars[rule][name]; ok {
-			return m.Vars[name][name], nil
+			return m.Vars[rule][name], nil
 		}
 	}
 
-	return "", fmt.Errorf("variable %q does not exist", name)
+	return "", fmt.Errorf("m.Var: variable %q does not exist", name)
 }
 
 // VarDefault returns the default value for variable
@@ -276,7 +405,7 @@ func (m *Manager) VarDefault(rule, name string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("variable %q does not exist", name)
+	return "", fmt.Errorf("m.VarDefault: variable %q does not exist", name)
 }
 
 // ResetVar resets a variable to its default value
@@ -296,40 +425,12 @@ func (vm *VariableModifier) Execute(variableName string, c *TriggerContext) erro
 	if vm.SetLiteral != nil {
 		value = *vm.SetLiteral
 	} else if vm.JSONQuery != nil {
-		if c.body == nil {
-			return errors.New("json query for triggered when no event body")
-		}
-
-		query, err := gojq.Parse(*vm.JSONQuery)
-		if err != nil {
-			return fmt.Errorf("invalid gojq query: %w", err)
-		}
-
-		ctx, cancel := context.WithTimeout(
-			context.Background(),
-			time.Duration(c.m.Config.JQTimeoutMS)*time.Millisecond,
-		)
-		defer cancel()
-
-		var event any
-		err = json.Unmarshal(*c.body, event)
-
+		jqResult, err := c.m.JSONQuery(*vm.JSONQuery, c)
 		if err != nil {
 			return err
 		}
 
-		iter := query.RunWithContext(ctx, event)
-
-		queryValue, more := iter.Next()
-		if more {
-			return errors.New("json query returned multiple values")
-		}
-
-		if queryValue == nil {
-			return errors.New("json query returned nil")
-		}
-
-		value = fmt.Sprint(queryValue)
+		value = fmt.Sprint(jqResult)
 	} else if vm.Reset != nil {
 		if *vm.Reset {
 			err := c.m.ResetVar(c.ruleName, variableName)
@@ -348,4 +449,86 @@ func (vm *VariableModifier) Execute(variableName string, c *TriggerContext) erro
 	}
 
 	return nil
+}
+
+// JSONQuery performs a gojq query on the body, with the json query.
+func (m *Manager) JSONQuery(jsonQuery string, c *TriggerContext) (any, error) {
+	query, err := gojq.Parse(jsonQuery)
+	if err != nil {
+		return nil, fmt.Errorf("invalid gojq query: %w", err)
+	}
+
+	if c.body == nil {
+		return nil, errors.New("json query started for trigger context with no body")
+	}
+
+	var event any
+	err = json.Unmarshal(*c.body, &event)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Get variables within scope
+	vars := map[string]string{}
+	c.m.mu.RLock()
+	for k, v := range c.m.GlobalVars {
+		vars[k] = v
+	}
+	for k, v := range c.m.Vars[c.ruleName] {
+		vars[k] = v
+	}
+	c.m.mu.RUnlock()
+
+	// Add built-in variables
+	vars["_rule"] = c.ruleName
+	vars["_trigger"] = c.triggerName
+	if c.event != nil {
+		vars["_event"] = *c.event
+	} else {
+		vars["_event"] = ""
+	}
+
+	// Split variables into names/values
+	varNames := make([]string, 0, len(vars))
+	for k := range vars {
+		varNames = append(varNames, "$"+k)
+	}
+	varValues := make([]interface{}, 0, len(vars)) // values need to be interface array...
+	for _, v := range vars {
+		varValues = append(varValues, v)
+	}
+
+	// compile/execute with variables
+	code, err := gojq.Compile(query, gojq.WithVariables(varNames))
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(m.Config.JQTimeoutMS)*time.Millisecond,
+	)
+	defer cancel()
+
+	iter := code.RunWithContext(ctx, event, varValues...)
+
+	var queryValue interface{}
+
+	var count = 1 // already iterated once
+	val, more := iter.Next()
+
+	for ; more; val, more = iter.Next() {
+		if count >= m.Config.JQIterationLimit {
+			return nil, fmt.Errorf("json query exceeded iteration limit (%d)", m.Config.JQIterationLimit)
+		}
+
+		if val != nil {
+			queryValue = val
+		}
+
+		count++
+	}
+
+	return queryValue, nil
 }

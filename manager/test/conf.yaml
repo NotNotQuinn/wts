@@ -1,32 +1,19 @@
 ---
-baseURL: http://localhost:8080/
+baseURL: http://desktop.qdt.home.arpa:8080/
 port: 8080
 
 # 3 seconds
 jq-timeout-ms: 3000
+jq-iteration-limit: 100
 
 # Rules is a map of rule name to rule values
 rules:
-  ctrl-playsound:
-    # variables by default are only reset on restart
-    vars:
-      foobar-variable: xdddd
-      command: xd
-
+  zero-playsound:
     triggers:
-      &testData test data:
-        event: &testDataEvent http://localhost:4044/test/data
-        modify-vars:
-          foobar-variable:
-            jq: .foobar
+      keys:
+        event: http://pi1.qdt.home.arpa:8081/keylogger/data
 
     actions:
       playsound:
-        if:
-          jq: .data.foobar
-          is: buz
-          or:
-            - event-is: *testDataEvent
-              triggered-by: *testData
-        event: http://localhost:4044/playsound/request
-        data-jq: adkasdljhalsdalksglfgdlaflksd
+        dynamic-event: '"http://desktop.qdt.home.arpa:8080/p/key/" + .data.keyRepresentation + "/data"'
+        data-jq: .data

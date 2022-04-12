@@ -1,9 +1,13 @@
-github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8 h1:cDlZD07p1nMCKV0J6ZWKDNqOGpQIiKWienn1EB69wRo=
-github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8/go.mod h1:gWU5FDeFFYSZd5KgZ+Pyb2ku/cV4Y61hDkgP6DG9Ldg=
 github.com/BurntSushi/toml v0.4.1 h1:GaI7EiDXDRfa8VshkTj7Fym7ha+y8/XxIgD2okUIjLw=
 github.com/BurntSushi/toml v0.4.1/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
+github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8 h1:cDlZD07p1nMCKV0J6ZWKDNqOGpQIiKWienn1EB69wRo=
+github.com/NotNotQuinn/keylogger v0.0.0-20220223033538-e677cb9586d8/go.mod h1:gWU5FDeFFYSZd5KgZ+Pyb2ku/cV4Y61hDkgP6DG9Ldg=
+github.com/NotNotQuinn/keylogger v0.0.0-20220404225929-ec38e985d330 h1:cBDR5kA5LI+szrGri3dS44quMNTtR576rBuSo4/QgRs=
+github.com/NotNotQuinn/keylogger v0.0.0-20220404225929-ec38e985d330/go.mod h1:BqEXW6C9ymEIAClBdOuKThf4of8Xws3E/piJBFeSxz8=
 github.com/akrennmair/slice v0.0.0-20220105203817-49445747ab81 h1:HnuAxArB0uUxqjRvZdjhBxE3uPXNeJvNNbuaV4QhHMU=
 github.com/akrennmair/slice v0.0.0-20220105203817-49445747ab81/go.mod h1:jk5mJ+KFznfxbCEsOPgmJkozvBfVGeaqIMs31NhXlv0=
+github.com/alecthomas/repr v0.0.0-20220113201626-b1b626ac65ae h1:zzGwJfFlFGD94CyyYwCJeSuD32Gj9GTaSi5y9hoVzdY=
+github.com/alecthomas/repr v0.0.0-20220113201626-b1b626ac65ae/go.mod h1:2kn6fqh/zIyPLmm3ugklbEi5hg5wS435eygvNfaDQL8=
 github.com/coreos/go-systemd/v22 v22.3.2/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
