@@ -21,7 +21,13 @@ type EmitterMsg struct {
 }
 
 func main() {
+	//////////////////////////////////////
+	////             HUB              ////
+	//////////////////////////////////////
 	hubURL, _ := startHub(8080)
+	//////////////////////////////////////
+	////     NODE 1  (broadcaster)    ////
+	//////////////////////////////////////
 	node := startNode("node", 4044, hubURL)
 
 	err := node.SubscribeAll()
@@ -71,13 +77,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	err = node.Broadcast(node.BaseURL()+"/test/request", ActorMsg{
-		Sound: "xd",
-	})
-	if err != nil {
-		panic(err)
-	}
+	////////////////////////////////////////////////////
+	////      NODE 2 (third-party broadcaster)      ////
+	////////////////////////////////////////////////////
 
 	node2 := startNode("node2", 4045, hubURL)
 
@@ -87,21 +89,66 @@ func main() {
 	}
 
 	log.Debug().Msgf("[node2] Subscribed")
+	//////////////////////////////////////
+	////      NODE 3   (listener)     ////
+	//////////////////////////////////////
+	node3 := startNode("node3", 4046, hubURL)
 
-	err = wts.AddExternalActor[ActorMsg](node2, "http://localhost:4044/test")
+	if err = node3.SubscribeAll(); err != nil {
+		panic(err)
+	}
+	log.Debug().Msgf("[node3] Subscribed")
+
+	_, err = wts.AddActorHook(
+		node3, "http://localhost:4044/test",
+		func(msg wts.EventPayload[ActorMsg]) {
+			fmt.Println("[node3:hook] requested")
+		},
+		func(msg wts.EventPayload[ActorMsg]) {
+			fmt.Println("[node3:hook] executed")
+		},
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	err = wts.AddExternalEmitter[EmitterMsg](node2, "http://localhost:4044/test")
+	broadcastEventOnNode2, err := wts.AddActorHook[ActorMsg](
+		node2, "http://localhost:4044/test",
+		nil, nil,
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	err = node2.Broadcast("http://localhost:4044/test/request", ActorMsg{
+	broadcastDataOnNode3, err := wts.AddEmitterHook(
+		node3, "http://localhost:4044/test",
+		func(msg wts.EventPayload[EmitterMsg]) {
+			fmt.Println("data")
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	time.Sleep(time.Second)
+
+	err = broadcastEventOnNode2(ActorMsg{
 		Sound: "xd",
 	})
+	if err != nil {
+		panic(err)
+	}
 
+	time.Sleep(time.Second / 30)
+
+	err = broadcastEventOnNode2(ActorMsg{Sound: "xd"})
+	if err != nil {
+		panic(err)
+	}
+
+	err = broadcastDataOnNode3(EmitterMsg{
+		Xd: 90999,
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -134,14 +181,14 @@ func startHub(port int) (hubURL string, hub *websub.Hub) {
 			return // ignore
 		}
 
-		// content, err := io.ReadAll(body)
-		// if err != nil {
-		// 	panic(err)
-		// }
+		content, err := io.ReadAll(body)
+		if err != nil {
+			panic(err)
+		}
 
 		log.Debug().
 			Str("topic", topic).
-			// Str("content", string(content)).
+			Str("content", string(content)).
 			Msgf("[hub] new publish")
 	})
 

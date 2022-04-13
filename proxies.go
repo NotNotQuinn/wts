@@ -2,7 +2,6 @@ package wts
 
 import (
 	"fmt"
-	"reflect"
 )
 
 type actorProxy struct {
@@ -28,23 +27,16 @@ func proxyIndicatorFunc[MsgType any](
 	return func(msg *EventPayload[any]) (ok bool) {
 		switch msgData := msg.Data.(type) {
 		case MsgType:
-			// There is no alternative
-			var new EventPayload[MsgType]
-			new.Data = msgData
-			new.DateSent = msg.DateSent
-			new.EventType = msg.EventType
-			new.Sender = msg.Sender
-			return cb(&new)
+			return cb(&EventPayload[MsgType]{
+				Data:      msgData,
+				DateSent:  msg.DateSent,
+				EventType: msg.EventType,
+				Sender:    msg.Sender,
+			})
 		default:
 			panic(panicMessage)
 		}
 	}
-}
-
-// An externalProxy proxies encoding for an external actor and/or an external emitter
-type externalProxy struct {
-	actor   *encoderProxy
-	emitter *encoderProxy
 }
 
 // An encoder proxy proxies encoding for a specific type to generic functions
@@ -62,11 +54,9 @@ func NewEncoderProxy[MsgType any]() *encoderProxy {
 			case MsgType:
 				return EncodeMessage(msg, eventType, sender)
 			default:
-				providedType := reflect.TypeOf(msg)
-				expectedType := reflect.TypeOf(*new(MsgType))
 				return nil, fmt.Errorf(
-					"encoderProxy.encode: expected type %s but found %s",
-					expectedType.String(), providedType.String(),
+					"encoderProxy.encode: expected type %T but found %T",
+					*new(MsgType), msg,
 				)
 			}
 		},
