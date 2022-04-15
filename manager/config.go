@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/itchyny/gojq"
 	"github.com/notnotquinn/wts"
@@ -13,75 +12,64 @@ import (
 
 // Config is the configuration for a Manager
 type Config struct {
-	BaseURL          string            `yaml:"baseURL"`
-	HubPort          int               `yaml:"port"`
-	JQTimeoutMS      int               `yaml:"jq-timeout-ms"`
-	JQIterationLimit int               `yaml:"jq-iteration-limit"`
-	Vars             map[string]string `yaml:"vars"`
-	Rules            map[string]Rule   `yaml:"rules"`
+	// The URL for the manager to use as its base
+	BaseURL string `yaml:"baseURL"`
+	// The port to expose itself on
+	HubPort int `yaml:"port"`
+	// The default value for all variables
+	InitialVars map[string]string `yaml:"vars"`
+	// Different rules for configuring logic
+	Rules map[string]ConfRule `yaml:"rules"`
 }
 
-// Rule is a rule that can be triggered by triggers, and has variables local to itself.
+// ConfRule is a rule that can be triggered by triggers, and has variables local to itself.
 //
 // When a rule is triggered all of the rule's actions are also triggered.
-type Rule struct {
-	Vars     map[string]string  `yaml:"vars"`
-	Triggers map[string]Trigger `yaml:"triggers"`
-	Actions  map[string]Action  `yaml:"actions"`
+type ConfRule struct {
+	Triggers map[string]ConfTrigger `yaml:"triggers"`
+	Actions  map[string]ConfAction  `yaml:"actions"`
 }
 
-// Trigger is a single trigger for a rule.
+// ConfTrigger is a single trigger for a rule.
 //
 // When a trigger is triggered, it can optionally set certain variables.
-type Trigger struct {
-	Event      *string                     `yaml:"event"`
-	ModifyVars map[string]VariableModifier `yaml:"modify-vars"`
+type ConfTrigger struct {
+	Event      *string                         `yaml:"event"`
+	ModifyVars map[string]ConfVariableModifier `yaml:"modify-vars"`
 }
 
-// VariableModifier modifies a variable when it is triggered to either as part of an action
+// ConfVariableModifier modifies a variable when it is triggered to either as part of an action
 // or as part of a trigger.
-type VariableModifier struct {
-	JSONQuery  *string `yaml:"jq"`
-	SetLiteral *string `yaml:"set"`
-	Reset      *bool   `yaml:"reset"`
+type ConfVariableModifier struct {
+	JSONQuery *string `yaml:"set"`
+	Reset     *bool   `yaml:"reset"`
 }
 
-// Action is a single action that can be taken when a rule is triggered.
+// ConfAction is a single action that can be taken when a rule is triggered.
 //
 // The action itself may have conditions that must be met for it to trigger,
 // other than the rule its a part of triggering.
-type Action struct {
-	TriggerCondition *TriggerCondition           `yaml:"if"`
-	Event            *string                     `yaml:"event"`
-	DynamicEvent     *string                     `yaml:"dynamic-event"`
-	ModifyVars       map[string]VariableModifier `yaml:"modify-vars"`
-	DataQuery        *string                     `yaml:"data-jq"`
+type ConfAction struct {
+	TriggerCondition *ConfTriggerCondition           `yaml:"if"`
+	ModifyVars       map[string]ConfVariableModifier `yaml:"modify-vars"`
+	EventJQ          string                          `yaml:"event"`
+	DataJQ           string                          `yaml:"data"`
 }
 
-// TriggerCondition specifies a condition.
+// ConfTriggerCondition specifies a condition.
 //
-// Multiple conditions in the same structure are ANDed together.
-//
-// Fields grouped together are mutually exclusive, and only one should be set.
-type TriggerCondition struct {
-	// The Event URL must be this for the action to trigger.
-	EventIs *string `yaml:"event-is"`
-
-	// The trigger of this action must go by this name for this action to trigger
-	TriggeredBy *string `yaml:"triggered-by"`
-
+// AND and OR are mutually exclusive
+type ConfTriggerCondition struct {
 	// A JSON query to get a value from
 	JSONQuery *string `yaml:"jq"`
-	// Variable name to get a value from
-	Variable *string `yaml:"var"`
 
 	// Checks if the value is this string
 	Is *string `yaml:"is"`
 
 	// Conditions to be logically ORed with this one
-	OR []*TriggerCondition `yaml:"or"`
+	OR []*ConfTriggerCondition `yaml:"or"`
 	// Conditions to be logically ANDed with this one
-	AND []*TriggerCondition `yaml:"and"`
+	AND []*ConfTriggerCondition `yaml:"and"`
 }
 
 func (c *Config) Load(configFile string) []error {
@@ -108,10 +96,10 @@ func (c *Config) validate() (errs []error) {
 	var err error
 	globalVars := map[string]bool{}
 
-	for varName := range c.Vars {
+	for varName := range c.InitialVars {
 		var hadErr bool
 
-		if strings.HasPrefix(varName, "_") {
+		if varName[0] == '_' {
 			hadErr = true
 			err = fmt.Errorf("variable name must not start with an underscore: %q", varName)
 			errs = append(errs, err)
@@ -141,46 +129,13 @@ func (c *Config) validate() (errs []error) {
 	return errs
 }
 
-// validate checks the Rule is valid
-func (r *Rule) validate(globalVars map[string]bool) (errs []error) {
+// validate checks the ConfRule is valid
+func (r *ConfRule) validate(vars map[string]bool) (errs []error) {
 	var err error
-	ruleVars := map[string]bool{}
-
-	for varName := range r.Vars {
-		var hadErr bool
-
-		if strings.HasPrefix(varName, "_") {
-			hadErr = true
-			err = fmt.Errorf("variable name must not start with an underscore: %q", varName)
-			errs = append(errs, err)
-		}
-
-		if globalVars[varName] {
-			hadErr = true
-			err = fmt.Errorf("variable shaddows global variable %q", varName)
-			errs = append(errs, err)
-		}
-
-		if ruleVars[varName] {
-			hadErr = true
-			err = fmt.Errorf("redeclaration of variable %q", varName)
-			errs = append(errs, err)
-		}
-
-		if !hadErr {
-			ruleVars[varName] = true
-		}
-	}
-
-	// append global vars to the rule vars, to simplify
-	for k, v := range globalVars {
-		ruleVars[k] = v
-	}
 
 	triggers := map[string]bool{}
-
 	for triggerName, trigger := range r.Triggers {
-		validationErrors := trigger.validate(ruleVars)
+		validationErrors := trigger.validate(vars)
 
 		hadErr := false
 
@@ -197,7 +152,7 @@ func (r *Rule) validate(globalVars map[string]bool) (errs []error) {
 	}
 
 	for actionName, action := range r.Actions {
-		validationErrors := action.validate(ruleVars, triggers)
+		validationErrors := action.validate(vars, triggers)
 
 		// Wrap all returned errors
 		for _, err2 := range validationErrors {
@@ -209,17 +164,9 @@ func (r *Rule) validate(globalVars map[string]bool) (errs []error) {
 	return errs
 }
 
-// validate checks the Action is valid
-func (a *Action) validate(vars, triggers map[string]bool) (errs []error) {
+// validate checks the ConfAction is valid
+func (a *ConfAction) validate(vars, triggers map[string]bool) (errs []error) {
 	var err error
-	if a.Event != nil {
-		err = validateEventString(*a.Event)
-		if err != nil {
-			err = fmt.Errorf("event: %w", err)
-			errs = append(errs, err)
-		}
-	}
-
 	for varName, vm := range a.ModifyVars {
 		validationErrors := vm.validate(varName, vars)
 
@@ -240,116 +187,64 @@ func (a *Action) validate(vars, triggers map[string]bool) (errs []error) {
 		}
 	}
 
-	if a.DataQuery != nil {
-		_, err := gojq.Parse(*a.DataQuery)
-		if err != nil {
-			errs = append(errs, err)
-		}
+	if a.DataJQ == "" {
+		err = fmt.Errorf("'data:' must be set")
+		errs = append(errs, err)
+	}
+	_, err = gojq.Parse(a.DataJQ)
+	if err != nil {
+		err = fmt.Errorf("data: jq parsing: %w", err)
+		errs = append(errs, err)
+	}
+
+	if a.EventJQ == "" {
+		err = fmt.Errorf("'event:' must be set")
+		errs = append(errs, err)
+	}
+	_, err = gojq.Parse(a.EventJQ)
+	if err != nil {
+		err = fmt.Errorf("event: jq parsing: %w", err)
+		errs = append(errs, err)
 	}
 
 	return errs
 }
 
-func (t *TriggerCondition) validate(vars map[string]bool, triggers map[string]bool) (errs []error) {
+func (t *ConfTriggerCondition) validate(vars map[string]bool, triggers map[string]bool) (errs []error) {
 	var err error
 	if t == nil {
 		return []error{errors.New("empty condition")}
 	}
 
 	var hadCondition bool
-	var hadValue bool
 
 	if t.AND != nil && t.OR != nil {
-		err = fmt.Errorf("\"and\" and \"or\" are mutually exclusive")
+		err = errors.New("'and' and 'or' are mutually exclusive")
 		errs = append(errs, err)
 	}
 
-	if t.JSONQuery != nil && t.Variable != nil {
-		err = fmt.Errorf("\"jq\" and \"var\" are mutually exclusive")
-		errs = append(errs, err)
-	}
-
-	if t.EventIs != nil {
+	if t.AND != nil || t.OR != nil || t.JSONQuery != nil {
 		hadCondition = true
-		err = validateEventString(*t.EventIs)
-		if err != nil {
-			err = fmt.Errorf("event-is: %w", err)
-			errs = append(errs, err)
-		}
-	}
-	//
-	if t.TriggeredBy != nil {
-		hadCondition = true
-		if !triggers[*t.TriggeredBy] {
-			err = fmt.Errorf("triggered-by: trigger %q does not exist on this rule", *t.TriggeredBy)
-			errs = append(errs, err)
-		}
-	}
-
-	if t.JSONQuery != nil {
-		hadValue = true
-		_, err = gojq.Parse(*t.JSONQuery)
-		if err != nil {
-			err = fmt.Errorf("jq: %w", err)
-			errs = append(errs, err)
-		}
-	}
-
-	if t.Variable != nil {
-		hadValue = true
-		if !vars[*t.Variable] {
-			err = fmt.Errorf("var: variable %q does not", *t.Variable)
-			errs = append(errs, err)
-		}
-	}
-
-	if t.OR != nil {
-		hadCondition = true
-		for i, tc := range t.OR {
-			validationErrors := tc.validate(vars, triggers)
-
-			// Wrap all returned errors
-			for _, err2 := range validationErrors {
-				err = fmt.Errorf("or[%d]: %w", i, err2)
-				errs = append(errs, err)
-			}
-		}
-	}
-
-	if t.AND != nil {
-		hadCondition = true
-		for i, tc := range t.AND {
-			validationErrors := tc.validate(vars, triggers)
-
-			// Wrap all returned errors
-			for _, err2 := range validationErrors {
-				err = fmt.Errorf("and[%d]: %w", i, err2)
-				errs = append(errs, err)
-			}
-		}
 	}
 
 	if t.Is != nil {
 		hadCondition = true
-		if !hadValue {
-			err = fmt.Errorf("condition has \"is:\" but no value to check (missing \"var: variable\"?)")
+		if t.JSONQuery == nil {
+			err = errors.New("cannot have 'is:' without 'jq:'")
 			errs = append(errs, err)
 		}
 	}
 
 	if !hadCondition {
-		err = fmt.Errorf("condition is meaningless")
-		if hadValue {
-			err = fmt.Errorf("condition is meaningless (missing \"is: value\")")
-		}
+		err = errors.New("condition is meaningless")
 		errs = append(errs, err)
 	}
 
 	return
 }
 
-// validate checks the Trigger is valid
-func (t *Trigger) validate(vars map[string]bool) (errs []error) {
+// validate checks the ConfTrigger is valid
+func (t *ConfTrigger) validate(vars map[string]bool) (errs []error) {
 	var err error
 	for varName, vm := range t.ModifyVars {
 		validationErrors := vm.validate(varName, vars)
@@ -370,27 +265,21 @@ func (t *Trigger) validate(vars map[string]bool) (errs []error) {
 	return errs
 }
 
-// validate checks the VariableModifier is valid
-func (vm *VariableModifier) validate(varName string, vars map[string]bool) (errs []error) {
+// validate checks the ConfVariableModifier is valid
+func (vm *ConfVariableModifier) validate(varName string, vars map[string]bool) (errs []error) {
 	var err error
 	if !vars[varName] {
 		err = fmt.Errorf("variable %q does not exist", varName)
 		errs = append(errs, err)
 	}
 
-	twoOrMore, none := checkExclusive(
-		vm.Reset != nil,
-		vm.JSONQuery != nil,
-		vm.SetLiteral != nil,
-	)
-
-	if none {
-		err = fmt.Errorf("one of \"reset\", \"jq\" xor \"set\" must be set")
+	if vm.Reset == nil && vm.JSONQuery == nil {
+		err = fmt.Errorf("one of 'reset:' or 'set:' must be set")
 		errs = append(errs, err)
 	}
 
-	if twoOrMore {
-		err = fmt.Errorf("\"reset\", \"jq\" and \"set\" are mutually exclusive")
+	if vm.Reset != nil && vm.JSONQuery != nil {
+		err = fmt.Errorf("'reset:' and 'set:' are mutually exclusive")
 		errs = append(errs, err)
 	}
 
@@ -402,21 +291,4 @@ func validateEventString(eventURL string) (err error) {
 	_, _, err = wts.ParseEventURL(eventURL)
 
 	return err
-}
-
-// checkExclusive tells you if two or more of the conditions are true, or if none are true
-func checkExclusive(conditions ...bool) (twoOrMoreTrue, noneTrue bool) {
-	anyTrue := false
-
-	for _, cond := range conditions {
-		if cond {
-			if anyTrue {
-				return true, !anyTrue
-			} else {
-				anyTrue = true
-			}
-		}
-	}
-
-	return false, !anyTrue
 }
