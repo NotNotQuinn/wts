@@ -378,6 +378,26 @@ func (n *Node) Broadcast(eventURL string, msgData any) error {
 	return nil
 }
 
+// BroadcastAny does not perform type checks
+func (n *Node) BroadcastAny(eventURL string, msgData any) error {
+	_, eventType, err := ParseEventURL(eventURL)
+	if err != nil {
+		return err
+	}
+
+	content, err := EncodeMessage(msgData, eventType, n.baseURL)
+	if err != nil {
+		return err
+	}
+
+	err = n.Publish(eventURL, PayloadContentType, content)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // getEventEncoder gets the encoder proxy for a specific event
 func (n *Node) getEventEncoder(eventURL string) (*encoderProxy, error) {
 	entityURL, eventType, err := ParseEventURL(eventURL)
