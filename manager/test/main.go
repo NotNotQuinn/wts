@@ -2,17 +2,19 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
-	"time"
+	"sync"
 
-	"github.com/k0kubun/pp"
-	"github.com/notnotquinn/wts"
+	"github.com/notnotquinn/go-websub"
 	"github.com/notnotquinn/wts/manager"
 )
 
+var log = websub.Logger()
+
 func main() {
-	m, errs := manager.NewManager("./manager/test/conf.yaml")
+	m, errs := manager.New("./manager/test/conf.yaml")
 	if len(errs) != 0 {
 
 		if len(errs) == 1 {
@@ -27,34 +29,33 @@ func main() {
 		panic(fmt.Sprintf("%d errors: see above\n", len(errs)))
 	}
 
-	pp.Println(m)
-	panic(http.ListenAndServe(fmt.Sprintf(":%d", m.Config.HubPort), m))
+	mu := sync.Mutex{}
 
-	emit, _ := createEmitter(4044, m.HubURL())
+	m.AddSniffer("", func(topic, contentType string, body io.Reader) {
+		// content, err := io.ReadAll(body)
+		// if err != nil {
+		// 	log.Err(err).Msg("failed to read sniffed body")
+		// }
 
-	time.Sleep(time.Second / 10)
+		mu.Lock()
 
-	emit(DummyEmitterThingy{
-		FoobarXd: "this is FoobarXd",
-		Lmao:     178,
+		log.Debug().
+			// Str("content", string(content)).
+			Str("topic", topic).
+			// Str("content-type", contentType).
+			Msg("[hub] sniffed topic")
+
+		// pp.Println(m.Node)
+
+		mu.Unlock()
 	})
-}
 
-type DummyEmitterThingy struct {
-	FoobarXd string `json:"foobar"`
-	Lmao     int    `json:"integer"`
-}
+	go http.ListenAndServe(fmt.Sprintf(":%d", m.Config.HubPort), m)
 
-func createEmitter(port int, hubUrl string) (emit func(d DummyEmitterThingy), node *wts.Node) {
-	baseURL := fmt.Sprintf("http://localhost:%d/", port)
-	bindAddr := fmt.Sprintf("127.0.0.1:%d", port)
-	n := wts.NewNode(baseURL, hubUrl)
+	err := m.Node.SubscribeAll()
+	if err != nil {
+		panic(err)
+	}
 
-	ch := make(chan DummyEmitterThingy)
-	wts.AddEmitter(n, wts.NewBasicEmitter("dummy", ch))
-
-	go http.ListenAndServe(bindAddr, n)
-	return func(d DummyEmitterThingy) {
-		ch <- d
-	}, n
+	<-make(chan struct{})
 }

@@ -2,18 +2,26 @@
 baseURL: http://desktop.qdt.home.arpa:8080/
 port: 8080
 
-# 3 seconds
-jq-timeout-ms: 3000
-jq-iteration-limit: 100
+vars:
+  key: ""
 
 # Rules is a map of rule name to rule values
 rules:
-  zero-playsound:
+  split-key-events:
     triggers:
       keys:
         event: http://pi1.qdt.home.arpa:8081/keylogger/data
+        modify-vars:
+          key:
+            set: .keyRepresentation
 
     actions:
       playsound:
-        dynamic-event: '"http://desktop.qdt.home.arpa:8080/p/key/" + .data.keyRepresentation + "/data"'
-        data-jq: .data
+        if:
+          jq: .mode == 1
+        event: |
+          "http://desktop.qdt.home.arpa:8080/event/key/" + ( $key | @uri ) + "/data"
+        data: .
+        modify-vars:
+          key:
+            reset: true
