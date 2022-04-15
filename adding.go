@@ -8,9 +8,9 @@ func AddActor[MsgType any](node *Node, a Actor[MsgType]) error {
 	proxy := newActorProxy(a)
 	actorURL := node.baseURL + "/" + a.Name()
 
-	node.mu.RLock()
-	_, exists := node.emitters[actorURL]
-	node.mu.RUnlock()
+	node.actorsMu.RLock()
+	_, exists := node.actors[actorURL]
+	node.actorsMu.RUnlock()
 
 	if exists {
 		return errors.New("actor already exists")
@@ -23,9 +23,9 @@ func AddActor[MsgType any](node *Node, a Actor[MsgType]) error {
 		}
 	}
 
-	node.mu.Lock()
+	node.actorsMu.Lock()
 	node.actors[actorURL] = proxy
-	node.mu.Unlock()
+	node.actorsMu.Unlock()
 	return nil
 }
 
@@ -33,17 +33,17 @@ func AddEmitter[MsgType any](node *Node, e Emitter[MsgType]) error {
 	proxy := newEmitterProxy(e)
 	emitterURL := node.baseURL + "/" + e.Name()
 
-	node.mu.RLock()
+	node.emittersMu.RLock()
 	_, exists := node.emitters[emitterURL]
-	node.mu.RUnlock()
+	node.emittersMu.RUnlock()
 
 	if exists {
 		return errors.New("emitter already exists")
 	}
 
-	node.mu.Lock()
+	node.emittersMu.Lock()
 	node.emitters[emitterURL] = proxy
-	node.mu.Unlock()
+	node.emittersMu.Unlock()
 
 	go func(node *Node, emitterURL string, ch <-chan MsgType) {
 		for msg := range ch {
@@ -59,27 +59,33 @@ func AddEmitter[MsgType any](node *Node, e Emitter[MsgType]) error {
 	return nil
 }
 
+type OnEventFunc[MsgType any] func(eventURL string, msg *EventPayload[MsgType])
 type eventHook struct {
 	*encoderProxy
-	happened func(*EventPayload[any]) error
+	happened func(eventURL string, msg *EventPayload[any]) error
 }
 
 func AddEmitterHook[MsgType any](
 	node *Node,
 	actorURL string,
-	onData func(msg EventPayload[MsgType]),
+	onData OnEventFunc[MsgType],
 ) (broadcastData func(msg MsgType) error, err error) {
 	encoder := NewEncoderProxy[MsgType]()
+
+	if onData == nil {
+		// Add dummy event to keep the encoder for sending messages
+		onData = func(eventURL string, msg *EventPayload[MsgType]) {}
+	}
 
 	if onData != nil {
 		hook := newEventHook(onData)
 		hook.encoderProxy = encoder
 
-		node.mu.RLock()
+		node.hooksMu.RLock()
 		_, ok := node.hooks[actorURL]
-		node.mu.RUnlock()
+		node.hooksMu.RUnlock()
 
-		node.mu.Lock()
+		node.hooksMu.Lock()
 		if !ok {
 			node.hooks[actorURL] = map[EventType]*eventHook{
 				Data: hook,
@@ -87,7 +93,7 @@ func AddEmitterHook[MsgType any](
 		} else {
 			node.hooks[actorURL][Data] = hook
 		}
-		node.mu.Unlock()
+		node.hooksMu.Unlock()
 
 		if node.subscribed {
 			err := node.subscribeTopic(actorURL + "/" + string(Data))
@@ -105,26 +111,26 @@ func AddEmitterHook[MsgType any](
 func AddActorHook[MsgType any](
 	node *Node,
 	actorURL string,
-	onRequested func(msg EventPayload[MsgType]),
-	onExecuted func(msg EventPayload[MsgType]),
+	onRequested func(eventURL string, msg *EventPayload[MsgType]),
+	onExecuted func(eventURL string, msg *EventPayload[MsgType]),
 ) (broadcastRequest func(msg MsgType) error, err error) {
 	encoder := NewEncoderProxy[MsgType]()
 
 	if onRequested == nil && onExecuted == nil {
 		// add a fake hook so the event url is registered
 		// and has a decoder the node has access to
-		onRequested = func(msg EventPayload[MsgType]) {}
+		onRequested = func(eventURL string, msg *EventPayload[MsgType]) {}
 	}
 
 	if onExecuted != nil {
 		hook := newEventHook(onExecuted)
 		hook.encoderProxy = encoder
 
-		node.mu.RLock()
+		node.hooksMu.RLock()
 		_, ok := node.hooks[actorURL]
-		node.mu.RUnlock()
+		node.hooksMu.RUnlock()
 
-		node.mu.Lock()
+		node.hooksMu.Lock()
 		if !ok {
 			node.hooks[actorURL] = map[EventType]*eventHook{
 				Executed: hook,
@@ -132,7 +138,7 @@ func AddActorHook[MsgType any](
 		} else {
 			node.hooks[actorURL][Executed] = hook
 		}
-		node.mu.Unlock()
+		node.hooksMu.Unlock()
 
 		if node.subscribed {
 			err := node.subscribeTopic(actorURL + "/" + string(Executed))
@@ -146,11 +152,11 @@ func AddActorHook[MsgType any](
 		hook := newEventHook(onRequested)
 		hook.encoderProxy = encoder
 
-		node.mu.RLock()
+		node.hooksMu.RLock()
 		_, ok := node.hooks[actorURL]
-		node.mu.RUnlock()
+		node.hooksMu.RUnlock()
 
-		node.mu.Lock()
+		node.hooksMu.Lock()
 		if !ok {
 			node.hooks[actorURL] = map[EventType]*eventHook{
 				Request: hook,
@@ -158,7 +164,7 @@ func AddActorHook[MsgType any](
 		} else {
 			node.hooks[actorURL][Request] = hook
 		}
-		node.mu.Unlock()
+		node.hooksMu.Unlock()
 
 		if node.subscribed {
 			err := node.subscribeTopic(actorURL + "/" + string(Request))
@@ -173,13 +179,13 @@ func AddActorHook[MsgType any](
 	}, nil
 }
 
-func newEventHook[MsgType any](onEvent func(msg EventPayload[MsgType])) *eventHook {
+func newEventHook[MsgType any](onEvent OnEventFunc[MsgType]) *eventHook {
 	return &eventHook{
 		encoderProxy: NewEncoderProxy[MsgType](),
-		happened: func(e *EventPayload[any]) error {
+		happened: func(eventURL string, e *EventPayload[any]) error {
 			switch d := e.Data.(type) {
 			case MsgType:
-				onEvent(EventPayload[MsgType]{
+				onEvent(eventURL, &EventPayload[MsgType]{
 					Data:      d,
 					DateSent:  e.DateSent,
 					Sender:    e.Sender,

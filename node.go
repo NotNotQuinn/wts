@@ -26,16 +26,20 @@ type Node struct {
 	baseURL string
 	// maps entity URL to actor
 	actors map[string]*actorProxy
+	// actors mutex
+	actorsMu *sync.RWMutex
 	// maps entity URL to emitter
 	emitters map[string]*emitterProxy
+	// emitters mutex
+	emittersMu *sync.RWMutex
 	// maps entity URL to event type to hook
 	hooks map[string]map[EventType]*eventHook
+	// hooks mutex
+	hooksMu *sync.RWMutex
 	// subscriptions required for this node to function
 	subscriptions []*websub.SubscriberSubscription
-	// shared mutex for actors map, emitters map, hooks map, and subscriptions array
-	//
-	// could be seperated into 4 mutexes but thats a lot of variables for smol benifit
-	mu *sync.RWMutex
+	// subscriptions mutex
+	subscriptionsMu *sync.RWMutex
 	// Used in initialization of publisher only
 	pubOptions []websub.PublisherOption
 	// Used in initialization of subscriber only
@@ -54,11 +58,14 @@ func (n *Node) BaseURL() string {
 func NewNode(baseURL, hubURL string, options ...NodeOption) *Node {
 	baseURL = strings.TrimRight(baseURL, "/")
 	n := &Node{
-		baseURL:  baseURL,
-		actors:   make(map[string]*actorProxy),
-		emitters: make(map[string]*emitterProxy),
-		hooks:    make(map[string]map[EventType]*eventHook),
-		mu:       &sync.RWMutex{},
+		baseURL:         baseURL,
+		actors:          make(map[string]*actorProxy),
+		emitters:        make(map[string]*emitterProxy),
+		hooks:           make(map[string]map[EventType]*eventHook),
+		hooksMu:         &sync.RWMutex{},
+		emittersMu:      &sync.RWMutex{},
+		actorsMu:        &sync.RWMutex{},
+		subscriptionsMu: &sync.RWMutex{},
 		pubOptions: []websub.PublisherOption{
 			// Used to allow subscribers to subscribe to topic
 			// urls we dont publish but are still point to our server
@@ -147,24 +154,27 @@ func (n *Node) SubscribeAll() error {
 
 	n.subscribed = true
 
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
+	n.actorsMu.RLock()
 	for actorURL := range n.actors {
 		err := n.subscribeTopic(actorURL + "/" + string(Request))
 		if err != nil {
+			n.actorsMu.RUnlock()
 			return err
 		}
 	}
+	n.actorsMu.RUnlock()
 
+	n.hooksMu.RLock()
 	for entityURL, entityHooks := range n.hooks {
 		for eventType := range entityHooks {
 			err := n.subscribeTopic(entityURL + "/" + string(eventType))
 			if err != nil {
+				n.hooksMu.RUnlock()
 				return err
 			}
 		}
 	}
+	n.hooksMu.RUnlock()
 
 	return nil
 }
@@ -177,16 +187,16 @@ func (n *Node) UnsubscribeAll() error {
 
 	n.subscribed = false
 
-	n.mu.RLock()
+	n.subscriptionsMu.RLock()
 	for _, subscription := range n.subscriptions {
 		err := n.Unsubscribe(subscription)
 		if err != nil {
-			n.mu.RUnlock()
+			n.subscriptionsMu.RUnlock()
 			return err
 		}
 	}
 
-	n.mu.RUnlock()
+	n.subscriptionsMu.RUnlock()
 	return nil
 }
 
@@ -205,9 +215,9 @@ func (n *Node) subscribeTopic(topic string) error {
 		n.handleSubscription,
 	)
 
-	n.mu.Lock()
+	n.subscriptionsMu.Lock()
 	n.subscriptions = append(n.subscriptions, subscription)
-	n.mu.Unlock()
+	n.subscriptionsMu.Unlock()
 
 	return err
 }
@@ -265,28 +275,28 @@ func (n *Node) handleSubscription(
 	}
 
 	// is there a hook?
-	n.mu.RLock()
+	n.hooksMu.RLock()
 	entityHooks, exists := n.hooks[entityURL]
-	n.mu.RUnlock()
+	n.hooksMu.RUnlock()
 	if exists {
-		n.mu.RLock()
+		n.hooksMu.RLock()
 		hook, exists := entityHooks[eventType]
 		if exists {
-			err := hook.happened(message)
+			err := hook.happened(sub.Topic, message)
 			if err != nil {
 				log.Err(err).Msg("event hook reported an error")
 			}
 		}
-		n.mu.RUnlock()
+		n.hooksMu.RUnlock()
 		return
 	}
 
 	// Call actor things
 	switch eventType {
 	case Request:
-		n.mu.RLock()
+		n.actorsMu.RLock()
 		actor, exists := n.actors[entityURL]
-		n.mu.RUnlock()
+		n.actorsMu.RUnlock()
 		if !exists {
 			// how would this even happen
 			log.Error().
@@ -379,18 +389,18 @@ func (n *Node) getEventEncoder(eventURL string) (*encoderProxy, error) {
 	// check emitter, actor
 	switch eventType {
 	case Request, Executed:
-		n.mu.RLock()
+		n.actorsMu.RLock()
 		actor, exists := n.actors[entityURL]
-		n.mu.RUnlock()
+		n.actorsMu.RUnlock()
 
 		if exists {
 			encoder = actor.encoderProxy
 		}
 
 	case Data:
-		n.mu.RLock()
+		n.emittersMu.RLock()
 		emitter, exists := n.emitters[entityURL]
-		n.mu.RUnlock()
+		n.emittersMu.RUnlock()
 
 		if exists {
 			encoder = emitter.encoderProxy
@@ -402,14 +412,14 @@ func (n *Node) getEventEncoder(eventURL string) (*encoderProxy, error) {
 
 	// check hooks
 	if encoder == nil {
-		n.mu.RLock()
+		n.hooksMu.RLock()
 		entityHooks, exists := n.hooks[entityURL]
-		n.mu.RUnlock()
+		n.hooksMu.RUnlock()
 
 		if exists {
-			n.mu.RLock()
+			n.hooksMu.RLock()
 			hook, exists := entityHooks[eventType]
-			n.mu.RUnlock()
+			n.hooksMu.RUnlock()
 
 			if exists {
 				encoder = hook.encoderProxy
