@@ -101,10 +101,10 @@ func main() {
 
 	_, err = wts.AddActorHook(
 		node3, "http://localhost:4044/test",
-		func(msg wts.EventPayload[ActorMsg]) {
+		func(_ string, msg *wts.EventPayload[ActorMsg]) {
 			log.Debug().Msg("[node3:hook] requested")
 		},
-		func(msg wts.EventPayload[ActorMsg]) {
+		func(_ string, msg *wts.EventPayload[ActorMsg]) {
 			log.Debug().Msg("[node3:hook] executed")
 		},
 	)
@@ -128,8 +128,8 @@ func main() {
 		panic(err)
 	}
 	_, err = wts.AddEmitterHook(
-		node2, "http://localhost:4044/test",
-		func(msg wts.EventPayload[EmitterMsg]) {
+		node3, "http://localhost:4044/test",
+		func(_ string, msg *wts.EventPayload[EmitterMsg]) {
 			log.Debug().Msg("[node3:hook] data")
 		},
 	)
